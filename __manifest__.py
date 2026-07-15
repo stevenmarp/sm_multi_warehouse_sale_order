@@ -1,11 +1,11 @@
 # -*- coding: utf-8 -*-
 {
     'name': 'Multi Warehouse Sale Order',
-    'version': '18.0.1.0.0',
+    'version': '16.0.1.0.0',
     'category': 'Sales/Sales',
-    'summary': 'Choose between three warehouse delivery modes on Sales Orders: standard single warehouse, different warehouse per order line, or split a line quantity across multiple warehouses, with automatic stock suggestions, live free stock validation, and automatic delivery splitting in Odoo 18.',
+    'summary': 'Choose between three warehouse delivery modes on Sales Orders: standard single warehouse, different warehouse per order line, or split a line quantity across multiple warehouses, with automatic stock suggestions, live free stock validation, and automatic delivery splitting in Odoo 16.',
     'description': """
-Multi Warehouse Delivery for Sales Orders in Odoo 18
+Multi Warehouse Delivery for Sales Orders in Odoo 16
 ===================================================
 
 This module extends Odoo's delivery system to allow shipping products in a single Sales Order from different warehouses. It offers three distinct warehouse delivery modes configured per Sales Order:
