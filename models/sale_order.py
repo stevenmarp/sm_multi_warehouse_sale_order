@@ -51,6 +51,10 @@ class SaleOrderLine(models.Model):
         'sale.order.line.warehouse', 'sale_line_id',
         string='Warehouse Allocations', copy=True)
 
+    @property
+    def _product_uom(self):
+        return self.product_uom_id if 'product_uom_id' in self._fields else self.product_uom
+
     def action_open_allocation_wizard(self):
         self.ensure_one()
         view_id = self.env.ref('sm_multi_warehouse_sale_order.view_sale_order_line_allocation_form').id
@@ -72,7 +76,7 @@ class SaleOrderLine(models.Model):
         return {
             wh: self.product_id.uom_id._compute_quantity(
                 self.product_id.with_context(warehouse_id=wh.id).free_qty,
-                self.product_uom)
+                self._product_uom)
             for wh in warehouses
         }
 
@@ -108,33 +112,80 @@ class SaleOrderLine(models.Model):
                     {'warehouse_id': fallback.id, 'quantity': remaining}))
             self.warehouse_line_ids = commands
 
-    def _create_procurements(self, product_qty, procurement_uom, origin, values):
-        self.ensure_one()
-        if self.order_id.warehouse_mode != 'multi' or not self.warehouse_line_ids:
-            return super()._create_procurements(
-                product_qty, procurement_uom, origin, values)
-        procurements = []
-        remaining = product_qty
-        rounding = procurement_uom.rounding
-        for alloc in self.warehouse_line_ids:
-            qty = min(self.product_uom._compute_quantity(
-                alloc.quantity, procurement_uom), remaining)
-            if float_compare(qty, 0.0, precision_rounding=rounding) <= 0:
-                continue
-            procurements.append(self.env['procurement.group'].Procurement(
-                self.product_id, qty, procurement_uom,
-                self._get_location_final(), self.product_id.display_name,
-                origin, self.order_id.company_id,
-                dict(values, warehouse_id=alloc.warehouse_id)))
-            remaining -= qty
-        if float_compare(remaining, 0.0, precision_rounding=rounding) > 0:
-            # ponytail: leftover (qty raised after allocation) ships from the
-            # line warehouse instead of blocking the confirmation
-            procurements.append(self.env['procurement.group'].Procurement(
-                self.product_id, remaining, procurement_uom,
-                self._get_location_final(), self.product_id.display_name,
-                origin, self.order_id.company_id, values))
-        return procurements
+    def _action_launch_stock_rule(self, previous_product_uom_qty=False):
+        multi_lines = self.filtered(lambda l: l.order_id.warehouse_mode == 'multi' and l.warehouse_line_ids)
+        other_lines = self - multi_lines
+        
+        res = True
+        if other_lines:
+            res = super(SaleOrderLine, other_lines)._action_launch_stock_rule(previous_product_uom_qty)
+            
+        if multi_lines:
+            if self._context.get("skip_procurement"):
+                return True
+            precision = self.env['decimal.precision'].precision_get('Product Unit of Measure')
+            procurements = []
+            for line in multi_lines:
+                line = line.with_company(line.company_id)
+                if line.state != 'sale' or not line.product_id.type in ('consu', 'product'):
+                    continue
+                qty = line._get_qty_procurement(previous_product_uom_qty)
+                if float_compare(qty, line.product_uom_qty, precision_digits=precision) == 0:
+                    continue
+
+                group_id = line._get_procurement_group()
+                if not group_id:
+                    group_id = self.env['procurement.group'].create(line._prepare_procurement_group_vals())
+                    line.order_id.procurement_group_id = group_id
+                else:
+                    updated_vals = {}
+                    if group_id.partner_id != line.order_id.partner_shipping_id:
+                        updated_vals.update({'partner_id': line.order_id.partner_shipping_id.id})
+                    if group_id.move_type != line.order_id.picking_policy:
+                        updated_vals.update({'move_type': line.order_id.picking_policy})
+                    if updated_vals:
+                        group_id.write(updated_vals)
+
+                values = line._prepare_procurement_values(group_id=group_id)
+                product_qty = line.product_uom_qty - qty
+
+                line_uom = line._product_uom
+                quant_uom = line.product_id.uom_id
+                product_qty, procurement_uom = line_uom._adjust_uom_quantities(product_qty, quant_uom)
+                
+                remaining = product_qty
+                rounding = procurement_uom.rounding
+                
+                for alloc in line.warehouse_line_ids:
+                    alloc_qty = min(line_uom._compute_quantity(
+                        alloc.quantity, procurement_uom), remaining)
+                    if float_compare(alloc_qty, 0.0, precision_rounding=rounding) <= 0:
+                        continue
+                    procurements.append(self.env['procurement.group'].Procurement(
+                        line.product_id, alloc_qty, procurement_uom,
+                        line.order_id.partner_shipping_id.property_stock_customer,
+                        line.product_id.display_name, line.order_id.name,
+                        line.order_id.company_id,
+                        dict(values, warehouse_id=alloc.warehouse_id)))
+                    remaining -= alloc_qty
+                if float_compare(remaining, 0.0, precision_rounding=rounding) > 0:
+                    procurements.append(self.env['procurement.group'].Procurement(
+                        line.product_id, remaining, procurement_uom,
+                        line.order_id.partner_shipping_id.property_stock_customer,
+                        line.product_id.display_name, line.order_id.name,
+                        line.order_id.company_id, values))
+            if procurements:
+                procurement_group = self.env['procurement.group']
+                if self.env.context.get('import_file'):
+                    procurement_group = procurement_group.with_context(import_file=False)
+                procurement_group.run(procurements)
+
+            orders = multi_lines.mapped('order_id')
+            for order in orders:
+                pickings_to_confirm = order.picking_ids.filtered(lambda p: p.state not in ['cancel', 'done'])
+                if pickings_to_confirm:
+                    pickings_to_confirm.action_confirm()
+        return res
 
 
 class SaleOrderLineWarehouse(models.Model):
@@ -162,4 +213,4 @@ class SaleOrderLineWarehouse(models.Model):
             alloc.free_qty = product.uom_id._compute_quantity(
                 product.with_context(
                     warehouse_id=alloc.warehouse_id.id).free_qty,
-                alloc.sale_line_id.product_uom)
+                alloc.sale_line_id._product_uom)
