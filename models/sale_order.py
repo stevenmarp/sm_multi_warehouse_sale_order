@@ -92,19 +92,19 @@ class SaleOrderLine(models.Model):
                 self.warehouse_id = best
         else:
             remaining = self.product_uom_qty
-            commands = [fields.Command.clear()]
+            commands = [(5, 0, 0)]
             for wh in sorted(free, key=free.get, reverse=True):
                 if remaining <= 0:
                     break
                 take = min(free[wh], remaining)
                 if take <= 0:
                     continue
-                commands.append(fields.Command.create(
+                commands.append((0, 0,
                     {'warehouse_id': wh.id, 'quantity': take}))
                 remaining -= take
             if remaining > 0:
                 fallback = self.warehouse_id or self.order_id.warehouse_id
-                commands.append(fields.Command.create(
+                commands.append((0, 0,
                     {'warehouse_id': fallback.id, 'quantity': remaining}))
             self.warehouse_line_ids = commands
 
