@@ -38,7 +38,7 @@
                         groups="stock.group_stock_multi_warehouses"
                         column_invisible="parent.warehouse_mode != 'multi'"/>
             </xpath>
-            <xpath expr="//field[@name='order_line']/form//field[@name='route_id']" position="after">
+            <xpath expr="//field[@name='order_line']/form//field[@name='route_id' or @name='route_ids']" position="after">
                 <field name="warehouse_id"
                        options="{'no_create': True}"
                        groups="stock.group_stock_multi_warehouses"
