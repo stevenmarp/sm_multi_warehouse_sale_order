@@ -51,6 +51,10 @@ class SaleOrderLine(models.Model):
         'sale.order.line.warehouse', 'sale_line_id',
         string='Warehouse Allocations', copy=True)
 
+    @property
+    def _product_uom(self):
+        return self.product_uom_id if 'product_uom_id' in self._fields else self.product_uom
+
     def action_open_allocation_wizard(self):
         self.ensure_one()
         view_id = self.env.ref('sm_multi_warehouse_sale_order.view_sale_order_line_allocation_form').id
@@ -72,7 +76,7 @@ class SaleOrderLine(models.Model):
         return {
             wh: self.product_id.uom_id._compute_quantity(
                 self.product_id.with_context(warehouse_id=wh.id).free_qty,
-                self.product_uom)
+                self._product_uom)
             for wh in warehouses
         }
 
@@ -108,20 +112,38 @@ class SaleOrderLine(models.Model):
                     {'warehouse_id': fallback.id, 'quantity': remaining}))
             self.warehouse_line_ids = commands
 
-    def _create_procurements(self, product_qty, procurement_uom, origin, values):
+    def _create_procurements(self, product_qty, procurement_uom, *args, **kwargs):
         self.ensure_one()
         if self.order_id.warehouse_mode != 'multi' or not self.warehouse_line_ids:
-            return super()._create_procurements(
-                product_qty, procurement_uom, origin, values)
+            return super()._create_procurements(product_qty, procurement_uom, *args, **kwargs)
+
+        # Extract origin and values
+        if len(args) == 2:
+            origin = args[0]
+            values = args[1]
+        elif len(args) == 1:
+            origin = self.order_id.name
+            values = args[0]
+        else:
+            origin = kwargs.get('origin', self.order_id.name)
+            values = kwargs.get('values', {})
+
         procurements = []
         remaining = product_qty
         rounding = procurement_uom.rounding
+
+        # Determine Procurement class/model
+        if 'stock.rule' in self.env:
+            procurement_class = self.env['stock.rule']
+        else:
+            procurement_class = self.env['procurement.group']
+
         for alloc in self.warehouse_line_ids:
-            qty = min(self.product_uom._compute_quantity(
+            qty = min(self._product_uom._compute_quantity(
                 alloc.quantity, procurement_uom), remaining)
             if float_compare(qty, 0.0, precision_rounding=rounding) <= 0:
                 continue
-            procurements.append(self.env['procurement.group'].Procurement(
+            procurements.append(procurement_class.Procurement(
                 self.product_id, qty, procurement_uom,
                 self._get_location_final(), self.product_id.display_name,
                 origin, self.order_id.company_id,
@@ -130,7 +152,7 @@ class SaleOrderLine(models.Model):
         if float_compare(remaining, 0.0, precision_rounding=rounding) > 0:
             # ponytail: leftover (qty raised after allocation) ships from the
             # line warehouse instead of blocking the confirmation
-            procurements.append(self.env['procurement.group'].Procurement(
+            procurements.append(procurement_class.Procurement(
                 self.product_id, remaining, procurement_uom,
                 self._get_location_final(), self.product_id.display_name,
                 origin, self.order_id.company_id, values))
@@ -162,4 +184,4 @@ class SaleOrderLineWarehouse(models.Model):
             alloc.free_qty = product.uom_id._compute_quantity(
                 product.with_context(
                     warehouse_id=alloc.warehouse_id.id).free_qty,
-                alloc.sale_line_id.product_uom)
+                alloc.sale_line_id._product_uom)
