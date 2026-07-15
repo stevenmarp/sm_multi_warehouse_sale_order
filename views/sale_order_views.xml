@@ -12,7 +12,7 @@
                        readonly="state == 'sale'"/>
             </xpath>
             <!-- If warehouse_id is not already present, insert it -->
-            <xpath expr="//field[@name='order_line']/list/field[@name='product_uom_qty'][not(../field[@name='warehouse_id'])]" position="after" fail_if_not_found="0">
+            <xpath expr="//field[@name='order_line']/tree/field[@name='product_uom_qty'][not(../field[@name='warehouse_id'])]" position="after" fail_if_not_found="0">
                 <field name="warehouse_id"
                        optional="show"
                        options="{'no_create': True}"
@@ -22,7 +22,7 @@
                        force_save="1"/>
             </xpath>
             <!-- If warehouse_id is already present, modify its attributes to support Warehouse Mode -->
-            <xpath expr="//field[@name='order_line']/list/field[@name='warehouse_id']" position="attributes" fail_if_not_found="0">
+            <xpath expr="//field[@name='order_line']/tree/field[@name='warehouse_id']" position="attributes" fail_if_not_found="0">
                 <attribute name="column_invisible">parent.warehouse_mode != 'line'</attribute>
                 <attribute name="groups">stock.group_stock_multi_warehouses</attribute>
                 <attribute name="options">{'no_create': True}</attribute>
@@ -30,7 +30,7 @@
                 <attribute name="force_save">1</attribute>
             </xpath>
             <!-- Always add the allocation wizard button after product_uom_qty -->
-            <xpath expr="//field[@name='order_line']/list/field[@name='product_uom_qty']" position="after">
+            <xpath expr="//field[@name='order_line']/tree/field[@name='product_uom_qty']" position="after">
                 <button name="action_open_allocation_wizard"
                         type="object"
                         icon="fa-list"
@@ -55,11 +55,11 @@
                        invisible="display_type or parent.warehouse_mode != 'multi'"
                        readonly="parent.state == 'sale'"
                        force_save="1">
-                    <list editable="bottom">
+                    <tree editable="bottom">
                         <field name="warehouse_id" options="{'no_create': True}"/>
                         <field name="free_qty"/>
                         <field name="quantity"/>
-                    </list>
+                    </tree>
                 </field>
             </xpath>
         </field>
@@ -76,11 +76,11 @@
                 </group>
                 <label for="warehouse_line_ids"/>
                 <field name="warehouse_line_ids">
-                    <list editable="bottom">
+                    <tree editable="bottom">
                         <field name="warehouse_id" options="{'no_create': True}"/>
                         <field name="free_qty"/>
                         <field name="quantity"/>
-                    </list>
+                    </tree>
                 </field>
                 <footer>
                     <button string="Save &amp; Close" class="btn-primary" special="save" data-hotkey="q"/>
